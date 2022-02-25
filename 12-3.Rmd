@@ -1,0 +1,154 @@
+---
+title: "League of Legends 12.3"
+author: "Diogo da Silva Bichon"
+date: "18/02/2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r Library, include=FALSE}
+library(tidyverse)
+library(plotly)
+library(magrittr)
+library(car)
+library(Hmisc)
+library(nortest)
+library(corrplot)
+```
+
+```{r Wrangling, message=FALSE, warning=FALSE, include=FALSE}
+lol12_3<-read.csv(file="D:/Users/Bichon/Documents/Data Science e Analytics/LoL_Analytics/League of Legends Champion Stats 12.3.csv", sep=";")
+
+lol12_3 <- rename(lol12_3,
+                  champ = 1,
+                  class = 2,
+                  role = 3,
+                  tier = 4,
+                  score = 5,
+                  trend = 6,
+                  win = 7,
+                  role_rate = 8,
+                  pick = 9,
+                  ban = 10,
+                  kda = 11,
+                  region = 12)
+
+lol12_3$tier <- factor(lol12_3$tier, levels = c("D", "C","B", "A", "S", "God"),
+                       labels = c("D", "C","B", "A", "S", "God"))
+
+lol_region <- lol12_3 %>% dplyr::group_by(region) %>%
+  summarise(observações=n(),
+            media=mean(win),
+            mediana=median(win),
+            desv_pad=sd(win),
+            mínimo=min(win),
+            máximo=max(win),
+            quartil_3=quantile(win, type=5, 0.75))
+
+lol_tier <- lol12_3 %>% dplyr::group_by(tier) %>%
+  summarise(observações=n(),
+            media=mean(win),
+            mediana=median(win),
+            desv_pad=sd(win),
+            mínimo=min(win),
+            máximo=max(win),
+            quartil_3=quantile(win, type=5, 0.75))
+
+lol_num <- lol12_3[,5:11]
+```
+# Análise estatística do patch 12.3
+
+O banco de dados utilizado para esta análise foi retirado do [kaggle] (https://www.kaggle.com/vivovinco/league-of-legends-champion-stats) e as regiões de cada campeão foram inseridas manualmente. **Esta análise foi feita com linguagem R**
+
+## Estatísticas
+
+O primeiro passo é realizar os testes estatísticos para sabermos com que tipo de distruibuição estamos lidando. Como a nossa variável de interesse é o Win Rate e é ela que vai nortear as comparações das demais variáveis, será essa então o nosso principal alvo. __Para leigos: as análises estatísticas seguem diversas regras. Precisamos saber quais regras irão reger a nossa análise, para isso serve o teste de normalidade__
+
+Testes de normalidade: Shapiro-Wilk e Kolmogorov-Smirnov
+```{r Testes de Normalidade, echo=FALSE, warning=FALSE}
+shapiro.test(lol12_3$win)
+ks.test(lol12_3$win, "pnorm", 
+        mean(lol12_3$win), sd(lol12_3$win), exact = TRUE)
+```
+
+Ambos os testes apontaram normalidade(p-valor>0.05) sobre as Win Rates. Assim sendo, aplicaremos ANOVA E Tukey para sabermos se a Região e o Tier têm influencia sobre as Win Rates.
+```{r ANOVA region, echo=FALSE, message=FALSE, warning=FALSE}
+aov_win_region <- aov(lol12_3$win ~ lol12_3$region)
+summary(aov_win_region)
+```
+```{r ANOVA tier, echo=FALSE, message=FALSE, warning=FALSE}
+aov_win_tier <- aov(lol12_3$win ~lol12_3$tier)
+summary(aov_win_tier)
+```
+Em ambos os testes, o valor p foi menor que 0.05, indicando que utilizar essas duas variáveis como critério de escolha para elevar a win rate foi uma estratégia significativa durante o patch 12.3. Sendo o Tier mais impactante que a Região.
+Agora que sabemos que há impacto na probabilidade de vitória a depender de qual tier e região o seu campeão pertence, vejamos quais Tiers diferiram e quais foram semelhantes entre si 
+
+```{r Matriz Correlação Win x Tier, echo=FALSE, message=FALSE, warning=FALSE}
+tukey_tier<-TukeyHSD(aov_win_tier)
+plot(tukey_tier, las = 1)
+```
+
+Tudo o que a linha tracejada(na vertical) encosta quer dizer que são estatisticamente iguais, e o quanto mais centralizado a linha horizontal estiver a linha tracejada, mais esses Ties se parecem. Podemos ver que no patch 12.3 o Tier B teve uma Win Rate mais semelhante ao Tier que God do que o Tier A, algo muito contraintuitivo.
+
+Vejamos também como se comportaram as demais métricas quantitativas, como se deu a relação entre elas.
+```{r Matriz de Correlação, echo=FALSE, message=FALSE, warning=FALSE}
+lol_cor<-cor(lol_num)
+corrplot(lol_cor, type = "lower",method = "number")
+```
+
+Aqui temos uma matriz de correlação entre as métricas, onde quanto mais distante de 0 (para mais ou para menos) maior foi a correlação entre os fatores.
+
+## Plotagem
+
+Entramos agora a uma seção mais visual e menos técnica que a anterior. A seguir teremos diversos gráficos que ilustrarão como foi o patch passado, sob a ótica geográfica e por tier
+
+```{r Quantis de Win Rate por Região, echo=FALSE, message=FALSE, warning=FALSE}
+plot_ly(data = lol12_3, x= ~region, y = ~win,
+        type = 'box', quartilemethod='inclusive',
+        text = ~paste('Campeão: ',champ,'</br>Classe: ', class))
+```
+
+```{r Quantis de Win Rate por Tier, echo=FALSE, message=FALSE, warning=FALSE}
+plot_ly(data = lol12_3, x= ~tier, y = ~win,
+        type = 'box', quartilemethod='inclusive',
+        text = ~paste('Campeão: ',champ,'</br>Classe: ', class))
+```
+Algo interessante aconteceu aqui. Vimos que o Tier A não se assemelhava tanto ao Tier God, S e B (que são bem parecidos entre si). Mas agora temos a resposta do por que disso: Ele realmente não foi semelhante, só que não para pior e sim para melhor! A exceção de seu mínimo, todos os seus outros quantis foram superior aos demais. 
+
+Agora que sabemos que a região e o tier impactam sobre a probabilidade de vitória, olhando os gráficos acima você já pode ter uma ideia de quem pickar.
+
+Mas por um mero capricho, sejamos um pouco mais minunciosos. O próximo gráfico tem o pick rate implicito, esse é representado pelo tamanho das esferas. As demais informações estão explicitas.
+```{r Win Rate/Região, echo=FALSE, message=FALSE, warning=FALSE}
+plot_ly(data = lol12_3, x = ~win, y = ~region, 
+        text = ~paste('Campeão: ',champ, '</br>Classe: ',class, '</br> KDA',kda), 
+        type = 'scatter', 
+        mode = 'markers', 
+        color = ~role, 
+        marker = list(size = ~pick, opacity = 1)
+)
+```
+
+Acima vimos como foi o desempenhos de cada campeão separado por win rate. 
+Abaixo veremos um novo gráfico muito parecido, entretanto, separado por Tier.
+```{r Win Rate/Tier, echo=FALSE, message=FALSE, warning=FALSE}
+plot_ly(data = lol12_3, x = ~win, y = ~tier, 
+        text = ~paste('Campeão: ',champ, '</br>Classe: ',class, '</br> KDA',kda), 
+        type = 'scatter', 
+        mode = 'markers', 
+        color = ~role, 
+        marker = list(size = ~pick, opacity = 1)
+)
+```
+
+Por fim e não menos importante, o desempenho das Nações em Summoner's Rift nesse patch que se foi.
+```{r Scatter Win Rate x Região, echo=FALSE, message=FALSE, warning=FALSE}
+p <- lol_region %>% ggplot() +
+  geom_point(mapping = aes(x=media, y=region)) +
+  labs(title = "Média da Win Rate por Região ")
+
+ggplotly(p)
+
+```
+
+Agora com todas essas informações em mãos, você pode tomar decisões mais acertadas sobre o que deve fazer para melhorar o seu desempenho. Lembre-se, eu apenas te dei as informações, o tomador de decisão é VOCÊ!
